@@ -1,0 +1,124 @@
+version: "2.3"
+services:
+
+  wireguard: # IP: 172.90.0.50
+    image: linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+      - SERVERPORT=${WG_PORT}
+      - SERVERURL=${WG_SERVER_URL}
+      - PEERS=${WG_PEERS}
+      - PEERDNS=172.90.0.51
+      - INTERNAL_SUBNET=10.13.13.0
+    networks:
+      default:
+        ipv4_address: 172.90.0.50
+    volumes:
+      - ${WG_CONF}:/config
+      - /lib/modules:/lib/modules
+      - /usr/src:/usr/src
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    dns:
+      - 172.90.0.51
+
+  duckdns: # IP: 172.90.0.52
+    image: lscr.io/linuxserver/duckdns:latest
+    container_name: duckdns
+    environment:
+      - PUID=1000 #optional
+      - PGID=1000 #optional
+      - TZ=${TZ}
+      - SUBDOMAINS=${DUCK_SUBDOMAIN}
+      - TOKEN=${DUCK_TOKEN}
+      - LOG_FILE=true #optional
+    networks:
+      default:
+        ipv4_address: 172.90.0.52
+    volumes:
+      - ${DUCK_CONF}:/config #optional
+    restart: unless-stopped
+    dns: 
+      - 1.1.1.1
+      - 8.8.8.8
+  
+  pihole: # IP: 172.90.0.51
+    image: docker.io/pihole/pihole
+    container_name: pihole
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "67:67/udp"
+      - "8081:80/tcp"
+      - "4443:443/tcp"
+    # expose:
+    #   - "80"
+    #   - "443"
+    environment:
+      TZ: ${TZ}
+      WEBPASSWORD: ${PIHOLE_PASSWORD}
+      VIRTUAL_HOST: ${PIHOLE_VIRTUAL_HOST}
+      LETSENCRYPT_HOST: ${PIHOLE_LETSENCRYPT_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}  
+    networks:
+      default:
+        ipv4_address: 172.90.0.51
+    volumes:
+      - ${PIHOLE_ETC}:/etc/pihole/
+      - ${PIHOLE_DNSMASQ}:/etc/dnsmasq.d/
+    dns: 
+      - 1.1.1.1
+      - 8.8.8.8
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  www: # IP: 172.90.0.64
+    image: nginx
+    container_name: www
+    restart: always
+    expose:
+      - "80"
+    volumes:
+      - ${WWW_CONF}:/usr/share/nginx/html:ro
+    environment:
+      - VIRTUAL_HOST=${WWW_VHOST}
+      - NGINX_HOST=${WWW_NGNX_HOST}
+      - NGINX_PORT=${WWW_PORT}
+      - LETSENCRYPT_HOST=${WWW_NGNX_HOST}
+    networks:
+      default:
+        ipv4_address: 172.90.0.64
+ 
+  nginx-proxy: # IP: 172.90.0.63
+    image: nginxproxy/nginx-proxy
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ${LETSENCRYPT_CONF}/certs:/etc/nginx/certs
+      - ${LETSENCRYPT_CONF}/vhost:/etc/nginx/vhost.d
+      - ${LETSENCRYPT_CONF}/html:/usr/share/nginx/html
+      - ./conf.d/client_max_upload_size.conf:/etc/nginx/conf.d/client_max_upload_size.conf
+    environment:
+      - DEFAULT_HOST=${WWW_NGNX_HOST}
+    networks:
+      default:
+        ipv4_address: 172.90.0.63
+
+networks:
+  default:
+    name: wgnet
+    external: true
